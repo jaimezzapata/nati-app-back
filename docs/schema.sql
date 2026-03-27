@@ -16,7 +16,9 @@ CREATE TABLE public.users (
   password_hash TEXT,
   is_verified BOOLEAN DEFAULT FALSE,
   verification_token TEXT,
-  CONSTRAINT users_admin_password_check CHECK (role <> 'admin' OR password_hash IS NOT NULL)
+  CONSTRAINT users_admin_password_check CHECK (role <> 'admin' OR password_hash IS NOT NULL),
+  CONSTRAINT users_member_requires_email CHECK (role <> 'member' OR email IS NOT NULL),
+  CONSTRAINT users_member_requires_gender CHECK (role <> 'member' OR gender IS NOT NULL)
 );
 
 -- Crear tabla de aportes con la relación (foreign key)
@@ -38,10 +40,10 @@ ALTER TABLE public.contributions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Permitir todo a usuarios" ON public.users FOR ALL USING (true);
 CREATE POLICY "Permitir todo a aportes" ON public.contributions FOR ALL USING (true);
 
-INSERT INTO public.users (id, name, phone, member_number, role, password_hash, is_verified) VALUES
-  ('11111111-1111-1111-1111-111111111111', 'Admin', '3000000000', 1, 'admin', crypt('admin123', gen_salt('bf')), TRUE),
-  ('22222222-2222-2222-2222-222222222222', 'Miembro 1', '3000000001', 2, 'member', NULL, TRUE),
-  ('33333333-3333-3333-3333-333333333333', 'Miembro 2', '3000000002', 3, 'member', NULL, TRUE);
+INSERT INTO public.users (id, name, phone, email, gender, member_number, role, password_hash, is_verified) VALUES
+  ('11111111-1111-1111-1111-111111111111', 'Admin', '3000000000', NULL, NULL, 1, 'admin', crypt('admin123', gen_salt('bf')), TRUE),
+  ('22222222-2222-2222-2222-222222222222', 'Miembro 1', '3000000001', 'miembro1@demo.com', 'M', 2, 'member', NULL, TRUE),
+  ('33333333-3333-3333-3333-333333333333', 'Miembro 2', '3000000002', 'miembro2@demo.com', 'F', 3, 'member', NULL, TRUE);
 
 INSERT INTO public.contributions (user_id, month, period, date, amount) VALUES
   ('22222222-2222-2222-2222-222222222222', 1, 1, '2026-01-05', 50000),
