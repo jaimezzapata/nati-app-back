@@ -9,9 +9,13 @@ CREATE TABLE public.users (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   name TEXT NOT NULL,
   phone TEXT UNIQUE NOT NULL,
+  email TEXT UNIQUE,
+  gender TEXT CHECK (gender IN ('M', 'F', 'Otro')),
   member_number INTEGER NOT NULL,
   role TEXT DEFAULT 'member' CHECK (role IN ('admin', 'member')),
   password_hash TEXT,
+  is_verified BOOLEAN DEFAULT FALSE,
+  verification_token TEXT,
   CONSTRAINT users_admin_password_check CHECK (role <> 'admin' OR password_hash IS NOT NULL)
 );
 
