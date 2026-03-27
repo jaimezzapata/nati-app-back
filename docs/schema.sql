@@ -1,0 +1,45 @@
+-- Eliminar tablas si existen para recrearlas correctamente
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+DROP TABLE IF EXISTS public.contributions;
+DROP TABLE IF EXISTS public.users;
+
+-- Crear tabla de usuarios
+CREATE TABLE public.users (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL,
+  phone TEXT UNIQUE NOT NULL,
+  member_number INTEGER NOT NULL,
+  role TEXT DEFAULT 'member' CHECK (role IN ('admin', 'member')),
+  password_hash TEXT,
+  CONSTRAINT users_admin_password_check CHECK (role <> 'admin' OR password_hash IS NOT NULL)
+);
+
+-- Crear tabla de aportes con la relación (foreign key)
+CREATE TABLE public.contributions (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+  period INTEGER NOT NULL CHECK (period IN (1, 2)),
+  date DATE NOT NULL,
+  amount NUMERIC NOT NULL
+);
+
+-- Habilitar RLS (Row Level Security) - Opcional si usas service_role key,
+-- pero recomendado por Supabase
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.contributions ENABLE ROW LEVEL SECURITY;
+
+-- Crear políticas para permitir todo (ya que el backend controla la lógica con el service_role key)
+CREATE POLICY "Permitir todo a usuarios" ON public.users FOR ALL USING (true);
+CREATE POLICY "Permitir todo a aportes" ON public.contributions FOR ALL USING (true);
+
+INSERT INTO public.users (id, name, phone, member_number, role, password_hash) VALUES
+  ('11111111-1111-1111-1111-111111111111', 'Admin', '3000000000', 1, 'admin', crypt('admin123', gen_salt('bf'))),
+  ('22222222-2222-2222-2222-222222222222', 'Miembro 1', '3000000001', 2, 'member', NULL),
+  ('33333333-3333-3333-3333-333333333333', 'Miembro 2', '3000000002', 3, 'member', NULL);
+
+INSERT INTO public.contributions (user_id, month, period, date, amount) VALUES
+  ('22222222-2222-2222-2222-222222222222', 1, 1, '2026-01-05', 50000),
+  ('22222222-2222-2222-2222-222222222222', 1, 2, '2026-01-20', 50000),
+  ('33333333-3333-3333-3333-333333333333', 1, 1, '2026-01-06', 50000);
