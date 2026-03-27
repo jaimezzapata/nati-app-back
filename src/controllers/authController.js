@@ -86,8 +86,20 @@ export async function register(req, res) {
     if (existing.email === email) return res.status(400).json({ message: 'El correo ya está registrado' })
   }
 
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    return res.status(500).json({ message: 'El servidor no tiene configurado el envío de correos' })
+  const missing = []
+  if (!process.env.SMTP_USER) missing.push('SMTP_USER')
+  if (!process.env.SMTP_PASS) missing.push('SMTP_PASS')
+  if (!process.env.FRONTEND_URL) missing.push('FRONTEND_URL')
+  if (missing.length) {
+    console.warn('Registro bloqueado por configuración faltante:', {
+      missing,
+      hasSmtpHost: Boolean(process.env.SMTP_HOST),
+      smtpPort: process.env.SMTP_PORT
+    })
+    return res.status(500).json({
+      message: 'El servidor no tiene configurado el envío de correos',
+      missing
+    })
   }
 
   let registrationToken
