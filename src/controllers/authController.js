@@ -4,10 +4,11 @@ import crypto from 'crypto'
 import nodemailer from 'nodemailer'
 import { supabase } from '../config/supabase.js'
 
-// Configuración de Nodemailer (usa variables de entorno o ethereal para pruebas)
+// Configuración de Nodemailer
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.ethereal.email',
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
   port: process.env.SMTP_PORT || 587,
+  secure: process.env.SMTP_PORT == 465, // true para 465, false para otros puertos
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS
@@ -99,12 +100,15 @@ export async function register(req, res) {
           <p>Si no fuiste tú, ignora este mensaje.</p>
         `
       })
+      res.status(201).json({ message: 'Registro exitoso. Revisa tu correo para confirmar tu cuenta.' })
     } catch (mailError) {
       console.error('Error enviando email:', mailError)
+      res.status(500).json({ message: 'Registro creado, pero hubo un error al enviar el correo. Intenta de nuevo más tarde o contacta soporte.' })
     }
+  } else {
+    console.warn('Advertencia: Faltan credenciales SMTP. No se envió correo.')
+    res.status(201).json({ message: 'Registro exitoso. (Nota: El servidor no tiene configurado el envío de correos).' })
   }
-
-  res.status(201).json({ message: 'Registro exitoso. Revisa tu correo para confirmar tu cuenta.' })
 }
 
 export async function verifyEmail(req, res) {
