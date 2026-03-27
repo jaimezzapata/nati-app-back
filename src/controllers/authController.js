@@ -15,53 +15,8 @@ const transporter = nodemailer.createTransport({
   }
 })
 
-function base64UrlEncode(input) {
-  return Buffer.from(input)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '')
-}
-
-function base64UrlDecode(input) {
-  const b64 = String(input).replace(/-/g, '+').replace(/_/g, '/')
-  const pad = b64.length % 4 === 0 ? '' : '='.repeat(4 - (b64.length % 4))
-  return Buffer.from(b64 + pad, 'base64')
-}
-
-function getRegistrationKey() {
-  const secret = process.env.REGISTRATION_SECRET || process.env.JWT_SECRET
-  if (!secret) return null
-  return crypto.createHash('sha256').update(secret).digest()
-}
-
-function createRegistrationToken(payload) {
-  const key = getRegistrationKey()
-  if (!key) throw new Error('Missing registration secret')
-  const iv = crypto.randomBytes(12)
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
-  const plaintext = Buffer.from(JSON.stringify(payload))
-  const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()])
-  const tag = cipher.getAuthTag()
-  return `${base64UrlEncode(iv)}.${base64UrlEncode(tag)}.${base64UrlEncode(encrypted)}`
-}
-
-function parseRegistrationToken(token) {
-  const key = getRegistrationKey()
-  if (!key) return null
-  const parts = String(token).split('.')
-  if (parts.length !== 3) return null
-  try {
-    const iv = base64UrlDecode(parts[0])
-    const tag = base64UrlDecode(parts[1])
-    const encrypted = base64UrlDecode(parts[2])
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv)
-    decipher.setAuthTag(tag)
-    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()])
-    return JSON.parse(decrypted.toString('utf8'))
-  } catch {
-    return null
-  }
+function generateVerificationCode() {
+  return crypto.randomInt(0, 1000000).toString().padStart(6, '0')
 }
 
 export async function register(req, res) {
@@ -89,7 +44,6 @@ export async function register(req, res) {
   const missing = []
   if (!process.env.SMTP_USER) missing.push('SMTP_USER')
   if (!process.env.SMTP_PASS) missing.push('SMTP_PASS')
-  if (!process.env.FRONTEND_URL) missing.push('FRONTEND_URL')
   if (missing.length) {
     console.warn('Registro bloqueado por configuración faltante:', {
       missing,
@@ -102,83 +56,66 @@ export async function register(req, res) {
     })
   }
 
-  let registrationToken
+  const code = generateVerificationCode()
+  let codeHash
   try {
-    const now = Date.now()
-    registrationToken = createRegistrationToken({
+    codeHash = await bcrypt.hash(code, 10)
+  } catch (e) {
+    console.error('Register code hash error:', e)
+    return res.status(500).json({ message: 'Error de servidor' })
+  }
+
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 15).toISOString()
+  const { error: pendingInsertError } = await supabase
+    .from('pending_registrations')
+    .insert([{
       name,
       phone,
       email,
       gender,
-      iat: now,
-      exp: now + 1000 * 60 * 60 * 24
-    })
-  } catch (e) {
-    console.error('Register token error:', e)
-    return res.status(500).json({ message: 'Error de servidor' })
+      code_hash: codeHash,
+      expires_at: expiresAt
+    }])
+
+  if (pendingInsertError) {
+    console.error('Pending registration insert error:', pendingInsertError)
+    return res.status(400).json({ message: 'No se pudo iniciar el registro. Intenta de nuevo.' })
   }
 
-  const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify?token=${encodeURIComponent(registrationToken)}`
+  const appUrl = process.env.FRONTEND_URL ? `<p>Ingresa a <strong>${process.env.FRONTEND_URL}</strong> y confirma tu registro.</p>` : ''
   try {
     await transporter.sendMail({
       from: `"Natillera" <${process.env.SMTP_USER}>`,
       to: email,
-      subject: 'Confirma tu cuenta en Natillera',
+      subject: 'Código de confirmación - Natillera',
       html: `
         <h2>¡Hola ${name}!</h2>
-        <p>Gracias por registrarte en Natillera. Para activar tu cuenta y poder ingresar, haz clic en el siguiente enlace:</p>
-        <a href="${verifyUrl}" style="display:inline-block;padding:10px 20px;background-color:#d980f8;color:white;text-decoration:none;border-radius:5px;">Confirmar mi cuenta</a>
+        <p>Gracias por registrarte en Natillera. Usa este código para confirmar tu cuenta:</p>
+        <div style="font-size:28px;letter-spacing:6px;font-weight:700;padding:12px 16px;background:#f3e8ff;border-radius:10px;display:inline-block">${code}</div>
+        <p style="margin-top:16px">Este código vence en <strong>15 minutos</strong>.</p>
+        ${appUrl}
         <p>Si no fuiste tú, ignora este mensaje.</p>
       `
     })
-    res.status(201).json({ message: 'Revisa tu correo para confirmar tu cuenta.' })
+    res.status(201).json({ message: 'Revisa tu correo e ingresa el código para confirmar tu cuenta.' })
   } catch (mailError) {
     console.error('Error enviando email:', mailError)
+    await supabase
+      .from('pending_registrations')
+      .delete()
+      .or(`phone.eq.${phone},email.eq.${email}`)
     res.status(500).json({ message: 'No se pudo enviar el correo de confirmación' })
   }
 }
 
 export async function verifyEmail(req, res) {
-  const { token } = req.body
-  if (!token) return res.status(400).json({ message: 'Token requerido' })
-
-  const { data: user, error: findError } = await supabase
-    .from('users')
-    .select('id')
-    .eq('verification_token', token)
-    .maybeSingle()
-
-  if (findError) {
-    console.error('Verify find error:', findError)
-    return res.status(500).json({ message: 'Error de servidor' })
-  }
-
-  if (user) {
-    const { error: updateError } = await supabase
-      .from('users')
-      .update({ is_verified: true, verification_token: null })
-      .eq('id', user.id)
-
-    if (updateError) {
-      return res.status(500).json({ message: 'Error al verificar la cuenta' })
-    }
-
-    return res.json({ message: 'Cuenta verificada exitosamente. Ya puedes iniciar sesión.' })
-  }
-
-  const payload = parseRegistrationToken(token)
-  if (!payload) return res.status(400).json({ message: 'Token inválido o expirado' })
-
-  const now = Date.now()
-  if (payload.exp && now > payload.exp) return res.status(400).json({ message: 'Token inválido o expirado' })
-
-  const { name, phone, email, gender } = payload
-  if (!name || !phone || !email || !gender) return res.status(400).json({ message: 'Token inválido o expirado' })
+  const { identifier, code } = req.body
+  if (!identifier || !code) return res.status(400).json({ message: 'Correo o teléfono y código requeridos' })
 
   const { data: existing, error: existingError } = await supabase
     .from('users')
     .select('id, phone, email')
-    .or(`phone.eq.${phone},email.eq.${email}`)
+    .or(`phone.eq.${identifier},email.eq.${identifier}`)
     .maybeSingle()
 
   if (existingError) {
@@ -189,6 +126,27 @@ export async function verifyEmail(req, res) {
   if (existing) {
     return res.status(400).json({ message: 'El usuario ya está registrado' })
   }
+
+  const { data: pending, error: pendingError } = await supabase
+    .from('pending_registrations')
+    .select('id, name, phone, email, gender, code_hash, expires_at')
+    .or(`phone.eq.${identifier},email.eq.${identifier}`)
+    .maybeSingle()
+
+  if (pendingError) {
+    console.error('Verify pending lookup error:', pendingError)
+    return res.status(500).json({ message: 'Error de servidor' })
+  }
+
+  if (!pending) return res.status(400).json({ message: 'Código inválido o expirado' })
+
+  if (pending.expires_at && Date.now() > new Date(pending.expires_at).getTime()) {
+    await supabase.from('pending_registrations').delete().eq('id', pending.id)
+    return res.status(400).json({ message: 'Código inválido o expirado' })
+  }
+
+  const ok = await bcrypt.compare(String(code), pending.code_hash)
+  if (!ok) return res.status(400).json({ message: 'Código inválido o expirado' })
 
   const { data: maxMemberData, error: maxMemberError } = await supabase
     .from('users')
@@ -202,15 +160,16 @@ export async function verifyEmail(req, res) {
     return res.status(500).json({ message: 'Error de servidor' })
   }
 
-  const nextMemberNumber = (maxMemberData?.member_number || 0) + 1
+  const maxMemberNumber = parseInt(String(maxMemberData?.member_number ?? '0'), 10)
+  const nextMemberNumber = (Number.isFinite(maxMemberNumber) ? maxMemberNumber : 0) + 1
 
   const { error: insertError } = await supabase
     .from('users')
     .insert([{
-      name,
-      phone,
-      email,
-      gender,
+      name: pending.name,
+      phone: pending.phone,
+      email: pending.email,
+      gender: pending.gender,
       member_number: nextMemberNumber,
       role: 'member',
       is_verified: true,
@@ -222,6 +181,7 @@ export async function verifyEmail(req, res) {
     return res.status(400).json({ message: 'Error al completar el registro' })
   }
 
+  await supabase.from('pending_registrations').delete().eq('id', pending.id)
   res.json({ message: 'Cuenta verificada exitosamente. Ya puedes iniciar sesión.' })
 }
 

@@ -1,7 +1,10 @@
 -- Eliminar tablas si existen para recrearlas correctamente
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
+-- Nota: member_number es BIGINT para evitar errores cuando se usan valores grandes (ej. números de teléfono)
+
 DROP TABLE IF EXISTS public.contributions;
+DROP TABLE IF EXISTS public.pending_registrations;
 DROP TABLE IF EXISTS public.users;
 
 -- Crear tabla de usuarios
@@ -11,7 +14,7 @@ CREATE TABLE public.users (
   phone TEXT UNIQUE NOT NULL,
   email TEXT UNIQUE,
   gender TEXT CHECK (gender IN ('M', 'F', 'Otro')),
-  member_number INTEGER NOT NULL,
+  member_number BIGINT NOT NULL,
   role TEXT DEFAULT 'member' CHECK (role IN ('admin', 'member')),
   password_hash TEXT,
   is_verified BOOLEAN DEFAULT FALSE,
@@ -19,6 +22,17 @@ CREATE TABLE public.users (
   CONSTRAINT users_admin_password_check CHECK (role <> 'admin' OR password_hash IS NOT NULL),
   CONSTRAINT users_member_requires_email CHECK (role <> 'member' OR email IS NOT NULL),
   CONSTRAINT users_member_requires_gender CHECK (role <> 'member' OR gender IS NOT NULL)
+);
+
+CREATE TABLE public.pending_registrations (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL,
+  phone TEXT UNIQUE NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  gender TEXT NOT NULL CHECK (gender IN ('M', 'F', 'Otro')),
+  code_hash TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Crear tabla de aportes con la relación (foreign key)
@@ -34,10 +48,12 @@ CREATE TABLE public.contributions (
 -- Habilitar RLS (Row Level Security) - Opcional si usas service_role key,
 -- pero recomendado por Supabase
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pending_registrations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.contributions ENABLE ROW LEVEL SECURITY;
 
 -- Crear políticas para permitir todo (ya que el backend controla la lógica con el service_role key)
 CREATE POLICY "Permitir todo a usuarios" ON public.users FOR ALL USING (true);
+CREATE POLICY "Permitir todo a pending_registrations" ON public.pending_registrations FOR ALL USING (true);
 CREATE POLICY "Permitir todo a aportes" ON public.contributions FOR ALL USING (true);
 
 INSERT INTO public.users (id, name, phone, email, gender, member_number, role, password_hash, is_verified) VALUES
