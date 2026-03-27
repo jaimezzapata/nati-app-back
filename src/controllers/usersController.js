@@ -27,7 +27,7 @@ export async function createUser(req, res) {
   const passwordHash = role === 'admin' ? await bcrypt.hash(password, 10) : null
   const { data, error } = await supabase
     .from('users')
-    .insert([{ name, phone, member_number: memberNumber, role, password_hash: passwordHash }])
+    .insert([{ name, phone, member_number: memberNumber, role, password_hash: passwordHash, is_verified: role === 'admin' }])
     .select('id, name, phone, member_number, role')
     .maybeSingle()
   if (error) {
@@ -64,7 +64,11 @@ export async function updateUser(req, res) {
   }
 
   if (role === 'admin' && password) updates.password_hash = await bcrypt.hash(password, 10)
-  if (role === 'member') updates.password_hash = null
+  if (role === 'admin') updates.is_verified = true
+  if (role === 'member') {
+    updates.password_hash = null
+    updates.is_verified = false
+  }
 
   if (Object.keys(updates).length === 0) {
     return res.status(400).json({ message: 'Sin cambios' })

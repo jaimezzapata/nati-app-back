@@ -21,11 +21,16 @@ export async function register(req, res) {
   }
 
   // Verificar si ya existe el teléfono o email
-  const { data: existing } = await supabase
+  const { data: existing, error: existingError } = await supabase
     .from('users')
     .select('id, phone, email')
     .or(`phone.eq.${phone},email.eq.${email}`)
     .maybeSingle()
+
+  if (existingError) {
+    console.error('Register existing check error:', existingError)
+    return res.status(500).json({ message: 'Error de servidor' })
+  }
 
   if (existing) {
     if (existing.phone === phone) return res.status(400).json({ message: 'El teléfono ya está registrado' })
@@ -33,13 +38,18 @@ export async function register(req, res) {
   }
 
   // Obtener el siguiente member_number
-  const { data: maxMemberData } = await supabase
+  const { data: maxMemberData, error: maxMemberError } = await supabase
     .from('users')
     .select('member_number')
     .order('member_number', { ascending: false })
     .limit(1)
     .maybeSingle()
   
+  if (maxMemberError) {
+    console.error('Register member_number error:', maxMemberError)
+    return res.status(500).json({ message: 'Error de servidor' })
+  }
+
   const nextMemberNumber = (maxMemberData?.member_number || 0) + 1
 
   // Generar token de verificación
@@ -63,27 +73,35 @@ export async function register(req, res) {
 
   if (error) {
     console.error('Register error:', error)
-    return res.status(500).json({ message: 'Error al registrar el usuario' })
+    return res.status(400).json({
+      message: 'Error al registrar el usuario',
+      error: {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint
+      }
+    })
   }
 
   // Enviar correo
   const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify?token=${verificationToken}`
-  try {
-    await transporter.sendMail({
-      from: '"Natillera" <noreply@natillera.com>',
-      to: email,
-      subject: 'Confirma tu cuenta en Natillera',
-      html: `
-        <h2>¡Hola ${name}!</h2>
-        <p>Gracias por registrarte en Natillera. Para activar tu cuenta y poder ingresar, haz clic en el siguiente enlace:</p>
-        <a href="${verifyUrl}" style="display:inline-block;padding:10px 20px;background-color:#d980f8;color:white;text-decoration:none;border-radius:5px;">Confirmar mi cuenta</a>
-        <p>Si no fuiste tú, ignora este mensaje.</p>
-      `
-    })
-    console.log(`Email de verificación enviado a ${email} - Token: ${verificationToken}`)
-  } catch (mailError) {
-    console.error('Error enviando email:', mailError)
-    // No bloqueamos el registro si el correo falla en dev, pero en prod sí deberíamos considerarlo
+  if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+    try {
+      await transporter.sendMail({
+        from: '"Natillera" <noreply@natillera.com>',
+        to: email,
+        subject: 'Confirma tu cuenta en Natillera',
+        html: `
+          <h2>¡Hola ${name}!</h2>
+          <p>Gracias por registrarte en Natillera. Para activar tu cuenta y poder ingresar, haz clic en el siguiente enlace:</p>
+          <a href="${verifyUrl}" style="display:inline-block;padding:10px 20px;background-color:#d980f8;color:white;text-decoration:none;border-radius:5px;">Confirmar mi cuenta</a>
+          <p>Si no fuiste tú, ignora este mensaje.</p>
+        `
+      })
+    } catch (mailError) {
+      console.error('Error enviando email:', mailError)
+    }
   }
 
   res.status(201).json({ message: 'Registro exitoso. Revisa tu correo para confirmar tu cuenta.' })
@@ -120,7 +138,7 @@ export async function login(req, res) {
   if (!phone) return res.status(400).json({ message: 'Teléfono requerido' })
   const { data, error } = await supabase
     .from('users')
-    .select('id, name, phone, member_number, role, password_hash')
+    .select('id, name, phone, member_number, role, password_hash, is_verified')
     .eq('phone', phone)
     .maybeSingle()
   if (error) {
@@ -129,7 +147,7 @@ export async function login(req, res) {
   }
   if (!data) return res.status(401).json({ message: 'Usuario no registrado' })
 
-  if (!data.is_verified) {
+  if (data.role === 'member' && !data.is_verified) {
     return res.status(403).json({ message: 'Debes verificar tu correo electrónico antes de iniciar sesión' })
   }
 

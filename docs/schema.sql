@@ -38,10 +38,10 @@ ALTER TABLE public.contributions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Permitir todo a usuarios" ON public.users FOR ALL USING (true);
 CREATE POLICY "Permitir todo a aportes" ON public.contributions FOR ALL USING (true);
 
-INSERT INTO public.users (id, name, phone, member_number, role, password_hash) VALUES
-  ('11111111-1111-1111-1111-111111111111', 'Admin', '3000000000', 1, 'admin', crypt('admin123', gen_salt('bf'))),
-  ('22222222-2222-2222-2222-222222222222', 'Miembro 1', '3000000001', 2, 'member', NULL),
-  ('33333333-3333-3333-3333-333333333333', 'Miembro 2', '3000000002', 3, 'member', NULL);
+INSERT INTO public.users (id, name, phone, member_number, role, password_hash, is_verified) VALUES
+  ('11111111-1111-1111-1111-111111111111', 'Admin', '3000000000', 1, 'admin', crypt('admin123', gen_salt('bf')), TRUE),
+  ('22222222-2222-2222-2222-222222222222', 'Miembro 1', '3000000001', 2, 'member', NULL, TRUE),
+  ('33333333-3333-3333-3333-333333333333', 'Miembro 2', '3000000002', 3, 'member', NULL, TRUE);
 
 INSERT INTO public.contributions (user_id, month, period, date, amount) VALUES
   ('22222222-2222-2222-2222-222222222222', 1, 1, '2026-01-05', 50000),
