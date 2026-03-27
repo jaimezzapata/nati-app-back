@@ -7,13 +7,8 @@ import reportRoutes from './routes/reports.js'
 
 const app = express()
 
-const allowed = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean)
 app.use(cors({
-  origin: function (origin, cb) {
-    if (!origin) return cb(null, true)
-    if (allowed.length === 0 || allowed.includes(origin)) return cb(null, true)
-    cb(new Error('Not allowed by CORS'))
-  },
+  origin: true, // Permite cualquier origen en producción/desarrollo (o puedes poner el array con 'https://nati-app-front.vercel.app')
   credentials: true
 }))
 
