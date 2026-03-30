@@ -73,6 +73,14 @@ export async function register(req, res) {
   }
 
   const expiresAt = new Date(Date.now() + 1000 * 60 * 15).toISOString()
+
+  // Eliminar cualquier intento de registro previo con el mismo teléfono o correo
+  // para evitar conflictos con las restricciones UNIQUE de la tabla
+  await supabase
+    .from('pending_registrations')
+    .delete()
+    .or(`phone.eq.${phone},email.eq.${email}`)
+
   const { error: pendingInsertError } = await supabase
     .from('pending_registrations')
     .insert([{
