@@ -51,7 +51,7 @@ export async function getLoans(req, res) {
 
   let query = supabase
     .from('loans')
-    .select('id, user_id, requested_amount, interest_percent, interest_amount, total_due, max_percent_of_savings, status, reason, created_at, reviewed_at, reviewed_by')
+    .select('id, user_id, requested_amount, interest_percent, interest_amount, total_due, max_percent_of_savings, status, reason, created_at, reviewed_at, reviewed_by, users!loans_user_id_fkey ( name, phone )')
     .order('created_at', { ascending: false })
 
   if (!isAdmin || requestedUserId) query = query.eq('user_id', requestedUserId || req.user.id)
@@ -190,4 +190,3 @@ export async function getLoanEligibility(req, res) {
     }
   })
 }
-
