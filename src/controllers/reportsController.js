@@ -5,24 +5,56 @@ function toInt(v) {
   return Number.isNaN(n) ? undefined : n
 }
 
+function getCycleRange() {
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const startYear = now.getMonth() === 11 ? currentYear : currentYear - 1
+  const start = `${startYear}-12-01`
+  const end = `${startYear + 1}-11-30`
+  return { startYear, endYear: startYear + 1, start, end }
+}
+
+function monthFromDateString(dateStr) {
+  const s = String(dateStr || '')
+  const parts = s.split('-')
+  if (parts.length < 2) return null
+  const m = parseInt(parts[1], 10)
+  if (Number.isNaN(m) || m < 1 || m > 12) return null
+  return m
+}
+
 export async function dashboardMetrics(req, res) {
   const { data: users, error: usersError } = await supabase.from('users').select('id, role')
   if (usersError) return res.status(500).json({ message: 'Error' })
 
+  const cycle = getCycleRange()
+
   const { data: contributions, error: contributionsError } = await supabase
     .from('contributions')
-    .select('id, month, amount, date')
+    .select('id, month, amount, date, status')
+    .gte('date', cycle.start)
+    .lte('date', cycle.end)
   if (contributionsError) return res.status(500).json({ message: 'Error' })
 
+  const validContributions = contributions.filter(c => !c.status || c.status === 'approved')
   const members = users.filter(u => u.role === 'member').length
-  const totalAmount = contributions.reduce((s, c) => s + Number(c.amount || 0), 0)
+  const totalAmount = validContributions.reduce((s, c) => s + Number(c.amount || 0), 0)
 
   // Ingresos por mes (para gráfica de barras)
-  const monthlyData = Array.from({ length: 12 }, (_, i) => ({ month: i + 1, total: 0 }))
-  for (const c of contributions) {
-    if (c.month >= 1 && c.month <= 12) {
-      monthlyData[c.month - 1].total += Number(c.amount || 0)
-    }
+  const monthsOrder = [12, ...Array.from({ length: 11 }, (_, i) => i + 1)]
+  const monthlyData = monthsOrder.map(m => ({
+    month: m,
+    year: m === 12 ? cycle.startYear : cycle.endYear,
+    total: 0
+  }))
+
+  const idx = new Map(monthsOrder.map((m, i) => [m, i]))
+  for (const c of validContributions) {
+    const m = monthFromDateString(c.date) ?? Number(c.month)
+    if (!m || m < 1 || m > 12) continue
+    const i = idx.get(m)
+    if (i == null) continue
+    monthlyData[i].total += Number(c.amount || 0)
   }
 
   // Usuarios al día este mes actual vs en mora
@@ -33,13 +65,14 @@ export async function dashboardMetrics(req, res) {
   
   const { data: currentContributions } = await supabase
     .from('contributions')
-    .select('user_id, period')
+    .select('user_id, period, status')
     .eq('month', currentMonth)
     .gte('date', start)
     .lte('date', end)
 
   const userPeriods = new Map()
   for (const c of currentContributions || []) {
+    if (c.status && c.status !== 'approved') continue
     if (!userPeriods.has(c.user_id)) userPeriods.set(c.user_id, new Set())
     userPeriods.get(c.user_id).add(c.period)
   }
@@ -58,7 +91,8 @@ export async function dashboardMetrics(req, res) {
       upToDate,
       pending
     },
-    monthlyData
+    monthlyData,
+    cycle
   })
 }
 export async function reportSummary(req, res) {
@@ -79,7 +113,7 @@ export async function reportSummary(req, res) {
 
   let contributionsQuery = supabase
     .from('contributions')
-    .select('id, user_id, month, period, date, amount')
+    .select('id, user_id, month, period, date, amount, status')
     .order('date', { ascending: false })
 
   if (month != null) contributionsQuery = contributionsQuery.eq('month', month)
@@ -95,7 +129,9 @@ export async function reportSummary(req, res) {
   const aggByUserId = new Map()
   let grandTotal = 0
 
-  for (const c of contributions || []) {
+  const validContributions = (contributions || []).filter(c => !c.status || c.status === 'approved')
+
+  for (const c of validContributions) {
     const amount = Number(c.amount || 0)
     grandTotal += amount
 
@@ -127,4 +163,3 @@ export async function reportSummary(req, res) {
     users: rows
   })
 }
-
