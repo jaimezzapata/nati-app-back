@@ -1,19 +1,8 @@
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
-import nodemailer from 'nodemailer'
 import { supabase } from '../config/supabase.js'
-
-// Configuración de Nodemailer
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT || 587,
-  secure: String(process.env.SMTP_PORT) === '465',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-})
+import { sendEmail } from '../utils/mailer.js'
 
 function generateVerificationCode() {
   return crypto.randomInt(0, 1000000).toString().padStart(6, '0')
@@ -46,19 +35,10 @@ export async function register(req, res) {
     if (existing.email === email) return res.status(400).json({ message: 'El correo ya está registrado' })
   }
 
-  const missing = []
-  if (!process.env.SMTP_USER) missing.push('SMTP_USER')
-  if (!process.env.SMTP_PASS) missing.push('SMTP_PASS')
-  if (missing.length) {
-    console.warn('Registro bloqueado por configuración faltante:', {
-      missing,
-      hasSmtpHost: Boolean(process.env.SMTP_HOST),
-      smtpPort: process.env.SMTP_PORT
-    })
-    return res.status(500).json({
-      message: 'El servidor no tiene configurado el envío de correos',
-      missing
-    })
+  const hasResend = Boolean(process.env.RESEND_API_KEY)
+  const hasSmtp = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS)
+  if (!hasResend && !hasSmtp) {
+    return res.status(500).json({ message: 'El servidor no tiene configurado el envío de correos' })
   }
 
   const code = generateVerificationCode()
@@ -100,8 +80,7 @@ export async function register(req, res) {
 
   const appUrl = process.env.FRONTEND_URL ? `<p>Ingresa a <strong>${process.env.FRONTEND_URL}</strong> y confirma tu registro.</p>` : ''
   try {
-    await transporter.sendMail({
-      from: `"Natillera" <${process.env.SMTP_USER}>`,
+    await sendEmail({
       to: email,
       subject: 'Código de confirmación - Natillera',
       html: `
@@ -266,17 +245,18 @@ export async function requestPasswordReset(req, res) {
   if (!user) return res.status(404).json({ message: 'Usuario no encontrado' })
   if (!user.email) return res.status(400).json({ message: 'El usuario no tiene un correo electrónico configurado para recuperar la contraseña' })
 
-  const missing = []
-  if (!process.env.SMTP_USER) missing.push('SMTP_USER')
-  if (!process.env.SMTP_PASS) missing.push('SMTP_PASS')
-  if (missing.length) return res.status(500).json({ message: 'El servidor no tiene configurado el envío de correos' })
+  const hasResend = Boolean(process.env.RESEND_API_KEY)
+  const hasSmtp = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS)
+  if (!hasResend && !hasSmtp) return res.status(500).json({ message: 'El servidor no tiene configurado el envío de correos' })
 
   const code = generateVerificationCode()
   const codeHash = await bcrypt.hash(code, 10)
   const expiresAt = new Date(Date.now() + 1000 * 60 * 15).toISOString()
 
-  // Reusamos la tabla pending_registrations para guardar el código temporal
-  await supabase.from('pending_registrations').delete().eq('phone', phone)
+  await supabase
+    .from('pending_registrations')
+    .delete()
+    .or(`phone.eq.${phone},email.eq.${user.email}`)
   
   const { error: insertError } = await supabase
     .from('pending_registrations')
@@ -286,8 +266,8 @@ export async function requestPasswordReset(req, res) {
       email: user.email,
       code_hash: codeHash,
       expires_at: expiresAt,
-      gender: 'N/A', // Campo requerido en la tabla pero no usado para reset
-      password_hash: 'reset' // Campo requerido pero no usado aquí
+      gender: 'Otro',
+      password_hash: 'reset'
     }])
 
   if (insertError) {
@@ -296,8 +276,7 @@ export async function requestPasswordReset(req, res) {
   }
 
   try {
-    await transporter.sendMail({
-      from: `"Natillera" <${process.env.SMTP_USER}>`,
+    await sendEmail({
       to: user.email,
       subject: 'Recuperación de contraseña - Natillera',
       html: `

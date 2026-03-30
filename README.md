@@ -17,6 +17,18 @@ JWT_SECRET=change_me
 SUPABASE_URL=...
 SUPABASE_SERVICE_ROLE_KEY=...
 ALLOWED_ORIGINS=http://localhost:5173
+FRONTEND_URL=http://localhost:5173
+
+# Envío de correos (para registro y recuperación)
+# Recomendado en Render: Resend
+RESEND_API_KEY=...
+EMAIL_FROM=Natillera <onboarding@resend.dev>
+
+# Alternativa: SMTP (Gmail u otro)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=...
+SMTP_PASS=...
 ```
 
 ## Instalación
@@ -39,4 +51,3 @@ npm run dev
 - Autenticación por número de celular sin contraseña.
 - Token JWT de corta duración.
 - Validar CORS mediante `ALLOWED_ORIGINS`.
-
